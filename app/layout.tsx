@@ -5,23 +5,31 @@ import { minikitConfig } from "@/minikit.config";
 import { RootProvider } from "./rootProvider";
 import "./globals.css";
 
+const baseAppId = process.env.NEXT_PUBLIC_BASE_APP_ID || "";
+
 export async function generateMetadata(): Promise<Metadata> {
+  const other: Record<string, string> = {
+    "fc:miniapp": JSON.stringify({
+      version: minikitConfig.miniapp.version,
+      imageUrl: minikitConfig.miniapp.heroImageUrl,
+      button: {
+        title: `Launch ${minikitConfig.miniapp.name}`,
+        action: {
+          name: `Launch ${minikitConfig.miniapp.name}`,
+          type: "launch_miniapp",
+        },
+      },
+    }),
+  };
+
+  if (baseAppId) {
+    other["base:app_id"] = baseAppId;
+  }
+
   return {
     title: minikitConfig.miniapp.name,
     description: minikitConfig.miniapp.description,
-    other: {
-      "fc:miniapp": JSON.stringify({
-        version: minikitConfig.miniapp.version,
-        imageUrl: minikitConfig.miniapp.heroImageUrl,
-        button: {
-          title: `Launch ${minikitConfig.miniapp.name}`,
-          action: {
-            name: `Launch ${minikitConfig.miniapp.name}`,
-            type: "launch_miniapp",
-          },
-        },
-      }),
-    },
+    other,
   };
 }
 
