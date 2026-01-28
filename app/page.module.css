@@ -208,6 +208,17 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
+.checkinMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  opacity: 0.8;
+  padding: 0.4rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
 .checkinReward {
   display: inline-block;
   margin-left: 0.35rem;
@@ -276,6 +287,63 @@
   font-family: var(--font-jetbrains-mono), monospace;
   font-size: 0.8rem;
   opacity: 0.7;
+}
+
+.shareCard {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.shareTitle {
+  font-weight: 600;
+}
+
+.shareDescription {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-top: 0.2rem;
+}
+
+.shareActions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.metricsCard {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.metricsTitle {
+  font-weight: 600;
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.metricLabel {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.metricValue {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
 }
 
 .tipList {

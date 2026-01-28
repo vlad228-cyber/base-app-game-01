@@ -18,6 +18,7 @@ const CHECKIN_STORAGE_KEY = "pulse-tap-checkin";
 const CHECKIN_STREAK_KEY = "pulse-tap-checkin-streak";
 const CHECKIN_HISTORY_KEY = "pulse-tap-checkin-history";
 const CHECKIN_BONUS_PER_TAP = 1;
+const CHECKIN_DAILY_BONUS = 5;
 
 const comboLabels: Record<number, string> = {
   1: "Warm-up",
@@ -43,6 +44,9 @@ export default function Home() {
   const [checkInHistory, setCheckInHistory] = useState<CheckInHistoryItem[]>(
     []
   );
+  const [checkInBonusEarned, setCheckInBonusEarned] = useState(0);
+  const [shareClicks, setShareClicks] = useState(0);
+  const [checkInClicks, setCheckInClicks] = useState(0);
   const [endAt, setEndAt] = useState<number | null>(null);
 
   const lastTapRef = useRef<number | null>(null);
@@ -168,11 +172,38 @@ export default function Home() {
 
   const hasCheckedIn = checkInDate === today;
 
+  const trackEvent = (name: string, extra?: Record<string, unknown>) => {
+    try {
+      const payload = {
+        name,
+        ts: new Date().toISOString(),
+        url: typeof window !== "undefined" ? window.location.href : "",
+        ...extra,
+      };
+      if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+        const blob = new Blob([JSON.stringify(payload)], {
+          type: "application/json",
+        });
+        navigator.sendBeacon("/api/analytics", blob);
+      } else if (typeof fetch !== "undefined") {
+        fetch("/api/analytics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(() => undefined);
+      }
+    } catch {
+      // ignore analytics errors
+    }
+  };
+
   const handleCheckInSuccess = (response?: {
     transactionReceipts?: { transactionHash?: string }[];
   }) => {
     const txHash = response?.transactionReceipts?.[0]?.transactionHash;
     setCheckInDate(today);
+    setCheckInBonusEarned((prev) => prev + CHECKIN_DAILY_BONUS);
+    setScore((prev) => prev + CHECKIN_DAILY_BONUS);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(CHECKIN_STORAGE_KEY, today);
     }
@@ -187,6 +218,8 @@ export default function Home() {
       }
       return next;
     });
+
+    trackEvent("checkin_success", { txHash });
 
     setCheckInStreak((prev) => {
       const lastSaved =
@@ -368,6 +401,7 @@ export default function Home() {
                 calls={checkInCalls}
                 isSponsored
                 onSuccess={handleCheckInSuccess}
+                onStatus={() => setCheckInClicks((prev) => prev + 1)}
                 className={styles.checkinActions}
               >
                 <TransactionButton
@@ -384,6 +418,11 @@ export default function Home() {
                 check‑ins (contract allowlisted in Paymaster).
               </div>
             )}
+
+            <div className={styles.checkinMetaRow}>
+              <span>Daily bonus</span>
+              <strong>+{CHECKIN_DAILY_BONUS} score</strong>
+            </div>
 
             {checkInHistory.length > 0 && (
               <div className={styles.checkinHistory}>
@@ -402,6 +441,69 @@ export default function Home() {
                 </div>
               </div>
             )}
+          </div>
+
+          <div className={styles.shareCard}>
+            <div>
+              <div className={styles.shareTitle}>Share Pulse Tap</div>
+              <div className={styles.shareDescription}>
+                Copy the link or share with friends to get more plays.
+              </div>
+            </div>
+            <div className={styles.shareActions}>
+              <button
+                className={styles.secondaryButton}
+                type="button"
+                onClick={async () => {
+                  const url =
+                    typeof window !== "undefined" ? window.location.href : "";
+                  try {
+                    await navigator.clipboard.writeText(url);
+                  } catch {
+                    // ignore clipboard failures
+                  }
+                  setShareClicks((prev) => prev + 1);
+                  trackEvent("share_copy");
+                }}
+              >
+                Copy link
+              </button>
+              <button
+                className={styles.secondaryButton}
+                type="button"
+                onClick={() => {
+                  const url =
+                    typeof window !== "undefined" ? window.location.href : "";
+                  if (navigator.share) {
+                    navigator.share({ title: "Pulse Tap", url }).catch(() => {
+                      /* ignore */
+                    });
+                  }
+                  setShareClicks((prev) => prev + 1);
+                  trackEvent("share_native");
+                }}
+              >
+                Share
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.metricsCard}>
+            <div className={styles.metricsTitle}>Local stats</div>
+            <div className={styles.metricsGrid}>
+              <div>
+                <div className={styles.metricLabel}>Shares</div>
+                <div className={styles.metricValue}>{shareClicks}</div>
+              </div>
+              <div>
+                <div className={styles.metricLabel}>Check-in clicks</div>
+                <div className={styles.metricValue}>{checkInClicks}</div>
+              </div>
+              <div>
+                <div className={styles.metricLabel}>Bonus earned</div>
+                <div className={styles.metricValue}>{checkInBonusEarned}</div>
+              </div>
+            </div>
           </div>
 
           <div className={styles.statusRow}>
