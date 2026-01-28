@@ -47,6 +47,10 @@ export default function Home() {
   const [checkInBonusEarned, setCheckInBonusEarned] = useState(0);
   const [shareClicks, setShareClicks] = useState(0);
   const [checkInClicks, setCheckInClicks] = useState(0);
+  const [checkInStatus, setCheckInStatus] = useState<
+    "idle" | "pending" | "success" | "error"
+  >("idle");
+  const [checkInStatusMessage, setCheckInStatusMessage] = useState("");
   const [endAt, setEndAt] = useState<number | null>(null);
 
   const lastTapRef = useRef<number | null>(null);
@@ -130,6 +134,38 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("pulse-tap-metrics");
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved) as {
+        shareClicks?: number;
+        checkInClicks?: number;
+        checkInBonusEarned?: number;
+      };
+      if (typeof parsed.shareClicks === "number") {
+        setShareClicks(parsed.shareClicks);
+      }
+      if (typeof parsed.checkInClicks === "number") {
+        setCheckInClicks(parsed.checkInClicks);
+      }
+      if (typeof parsed.checkInBonusEarned === "number") {
+        setCheckInBonusEarned(parsed.checkInBonusEarned);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "pulse-tap-metrics",
+      JSON.stringify({ shareClicks, checkInClicks, checkInBonusEarned })
+    );
+  }, [shareClicks, checkInClicks, checkInBonusEarned]);
+
+  useEffect(() => {
     if (status !== "playing" || !endAt) return;
     const tick = () => {
       const remaining = Math.max(
@@ -202,6 +238,8 @@ export default function Home() {
   }) => {
     const txHash = response?.transactionReceipts?.[0]?.transactionHash;
     setCheckInDate(today);
+    setCheckInStatus("success");
+    setCheckInStatusMessage("Check-in confirmed.");
     setCheckInBonusEarned((prev) => prev + CHECKIN_DAILY_BONUS);
     setScore((prev) => prev + CHECKIN_DAILY_BONUS);
     if (typeof window !== "undefined") {
@@ -401,7 +439,20 @@ export default function Home() {
                 calls={checkInCalls}
                 isSponsored
                 onSuccess={handleCheckInSuccess}
-                onStatus={() => setCheckInClicks((prev) => prev + 1)}
+                onError={(error) => {
+                  setCheckInStatus("error");
+                  setCheckInStatusMessage(
+                    error?.message || "Transaction failed. Try again."
+                  );
+                  trackEvent("checkin_error", { error: error?.message });
+                }}
+                onStatus={(status) => {
+                  if (status?.statusName === "pending") {
+                    setCheckInStatus("pending");
+                    setCheckInStatusMessage("Transaction pending...");
+                  }
+                  setCheckInClicks((prev) => prev + 1);
+                }}
                 className={styles.checkinActions}
               >
                 <TransactionButton
@@ -418,6 +469,31 @@ export default function Home() {
                 check‑ins (contract allowlisted in Paymaster).
               </div>
             )}
+
+            <div className={styles.statusPillRow}>
+              <span
+                className={
+                  checkInStatus === "success"
+                    ? styles.statusPillSuccess
+                    : checkInStatus === "error"
+                      ? styles.statusPillError
+                      : checkInStatus === "pending"
+                        ? styles.statusPillPending
+                        : styles.statusPillIdle
+                }
+              >
+                {checkInStatus === "success"
+                  ? "Success"
+                  : checkInStatus === "error"
+                    ? "Error"
+                    : checkInStatus === "pending"
+                      ? "Pending"
+                      : "Idle"}
+              </span>
+              <span className={styles.statusMessage}>
+                {checkInStatusMessage || "Ready to check in."}
+              </span>
+            </div>
 
             <div className={styles.checkinMetaRow}>
               <span>Daily bonus</span>
@@ -459,6 +535,7 @@ export default function Home() {
                     typeof window !== "undefined" ? window.location.href : "";
                   try {
                     await navigator.clipboard.writeText(url);
+                    setCheckInStatusMessage("Link copied.");
                   } catch {
                     // ignore clipboard failures
                   }
