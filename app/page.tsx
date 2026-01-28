@@ -3,10 +3,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Wallet } from "@coinbase/onchainkit/wallet";
 import { useMiniKit } from "@coinbase/onchainkit/minikit";
+import {
+  Transaction,
+  TransactionButton,
+  TransactionSponsor,
+  TransactionToast,
+} from "@coinbase/onchainkit/transaction";
+import type { ContractFunctionParameters } from "viem";
 import styles from "./page.module.css";
 
 const ROUND_SECONDS = 30;
 const STORAGE_KEY = "pulse-tap-best";
+const CHECKIN_STORAGE_KEY = "pulse-tap-checkin";
+const CHECKIN_STREAK_KEY = "pulse-tap-checkin-streak";
+const CHECKIN_HISTORY_KEY = "pulse-tap-checkin-history";
+const CHECKIN_BONUS_PER_TAP = 1;
 
 const comboLabels: Record<number, string> = {
   1: "Warm-up",
@@ -17,6 +28,7 @@ const comboLabels: Record<number, string> = {
 };
 
 type GameStatus = "idle" | "playing" | "finished";
+type CheckInHistoryItem = { date: string; txHash?: string };
 
 export default function Home() {
   const { setMiniAppReady, isMiniAppReady } = useMiniKit();
@@ -26,10 +38,37 @@ export default function Home() {
   const [taps, setTaps] = useState(0);
   const [combo, setCombo] = useState(0);
   const [best, setBest] = useState(0);
+  const [checkInDate, setCheckInDate] = useState<string | null>(null);
+  const [checkInStreak, setCheckInStreak] = useState(0);
+  const [checkInHistory, setCheckInHistory] = useState<CheckInHistoryItem[]>(
+    []
+  );
   const [endAt, setEndAt] = useState<number | null>(null);
 
   const lastTapRef = useRef<number | null>(null);
   const comboRef = useRef(0);
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const checkInContract = process.env.NEXT_PUBLIC_CHECKIN_CONTRACT || "";
+  const isCheckInContractValid = /^0x[a-fA-F0-9]{40}$/.test(checkInContract);
+  const checkInCalls = useMemo<ContractFunctionParameters[] | null>(() => {
+    if (!isCheckInContractValid) return null;
+    return [
+      {
+        abi: [
+          {
+            type: "function",
+            name: "checkIn",
+            stateMutability: "nonpayable",
+            inputs: [],
+            outputs: [],
+          },
+        ],
+        address: checkInContract as `0x${string}`,
+        functionName: "checkIn",
+        args: [],
+      },
+    ];
+  }, [checkInContract, isCheckInContractValid]);
 
   useEffect(() => {
     if (!isMiniAppReady) {
@@ -44,6 +83,44 @@ export default function Home() {
       const parsed = Number.parseInt(saved, 10);
       if (!Number.isNaN(parsed)) {
         setBest(parsed);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem(CHECKIN_STORAGE_KEY);
+    if (saved) {
+      setCheckInDate(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem(CHECKIN_STREAK_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as { lastDate?: string; streak?: number };
+        if (parsed?.streak) {
+          setCheckInStreak(parsed.streak);
+        }
+      } catch {
+        // ignore invalid local storage
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem(CHECKIN_HISTORY_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as CheckInHistoryItem[];
+        if (Array.isArray(parsed)) {
+          setCheckInHistory(parsed);
+        }
+      } catch {
+        // ignore invalid local storage
       }
     }
   }, []);
@@ -89,6 +166,67 @@ export default function Home() {
     return "Ready";
   }, [combo]);
 
+  const hasCheckedIn = checkInDate === today;
+
+  const handleCheckInSuccess = (response?: {
+    transactionReceipts?: { transactionHash?: string }[];
+  }) => {
+    const txHash = response?.transactionReceipts?.[0]?.transactionHash;
+    setCheckInDate(today);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(CHECKIN_STORAGE_KEY, today);
+    }
+
+    setCheckInHistory((prev) => {
+      const next: CheckInHistoryItem[] = [
+        { date: today, txHash },
+        ...prev.filter((item) => item.date !== today),
+      ].slice(0, 5);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(CHECKIN_HISTORY_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+
+    setCheckInStreak((prev) => {
+      const lastSaved =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem(CHECKIN_STREAK_KEY)
+          : null;
+      let lastDate: string | null = null;
+      if (lastSaved) {
+        try {
+          const parsed = JSON.parse(lastSaved) as { lastDate?: string };
+          lastDate = parsed?.lastDate ?? null;
+        } catch {
+          lastDate = null;
+        }
+      }
+
+      const daysDiff = (() => {
+        if (!lastDate) return null;
+        const last = new Date(`${lastDate}T00:00:00Z`).getTime();
+        const current = new Date(`${today}T00:00:00Z`).getTime();
+        return Math.floor((current - last) / 86400000);
+      })();
+
+      let nextStreak = 1;
+      if (daysDiff === 0) {
+        nextStreak = Math.max(prev, 1);
+      } else if (daysDiff === 1) {
+        nextStreak = prev + 1;
+      }
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          CHECKIN_STREAK_KEY,
+          JSON.stringify({ lastDate: today, streak: nextStreak })
+        );
+      }
+      return nextStreak;
+    });
+  };
+
   const startGame = () => {
     setStatus("playing");
     setScore(0);
@@ -110,7 +248,11 @@ export default function Home() {
 
     setCombo(nextCombo);
     setTaps((prev) => prev + 1);
-    setScore((prev) => prev + 1 + Math.floor((nextCombo - 1) / 3));
+    const bonus = hasCheckedIn ? CHECKIN_BONUS_PER_TAP : 0;
+    setScore(
+      (prev) =>
+        prev + 1 + Math.floor((nextCombo - 1) / 3) + bonus
+    );
   };
 
   const handleTap = () => {
@@ -173,6 +315,12 @@ export default function Home() {
             <div className={styles.tapHint}>
               Tap fast to build combo. Combo adds bonus points and boosts your
               score.
+              {hasCheckedIn && (
+                <span className={styles.checkinReward}>
+                  {" "}
+                  Daily bonus: +{CHECKIN_BONUS_PER_TAP} per tap.
+                </span>
+              )}
             </div>
           </div>
 
@@ -193,6 +341,69 @@ export default function Home() {
         </section>
 
         <aside className={`${styles.card} ${styles.sidePanel}`}>
+          <div className={styles.checkinCard}>
+            <div className={styles.checkinHeader}>
+              <div>
+                <div className={styles.checkinTitle}>Daily check-in</div>
+                <div className={styles.checkinDescription}>
+                  Sign once per day to keep your streak and earn +1 per tap.
+                </div>
+              </div>
+              <span
+                className={
+                  hasCheckedIn ? styles.checkinBadge : styles.checkinBadgeMuted
+                }
+              >
+                {hasCheckedIn ? "Checked in" : "Not yet"}
+              </span>
+            </div>
+
+            <div className={styles.checkinMeta}>
+              <span>Streak</span>
+              <strong>{checkInStreak} days</strong>
+            </div>
+
+            {checkInCalls ? (
+              <Transaction
+                calls={checkInCalls}
+                isSponsored
+                onSuccess={handleCheckInSuccess}
+                className={styles.checkinActions}
+              >
+                <TransactionButton
+                  text={hasCheckedIn ? "Checked in today" : "Check in on-chain"}
+                  disabled={hasCheckedIn}
+                  className={styles.checkinButton}
+                />
+                <TransactionSponsor />
+                <TransactionToast />
+              </Transaction>
+            ) : (
+              <div className={styles.checkinHint}>
+                Set NEXT_PUBLIC_CHECKIN_CONTRACT in your env to enable on‑chain
+                check‑ins (contract allowlisted in Paymaster).
+              </div>
+            )}
+
+            {checkInHistory.length > 0 && (
+              <div className={styles.checkinHistory}>
+                <div className={styles.checkinHistoryTitle}>Recent check-ins</div>
+                <div className={styles.checkinHistoryList}>
+                  {checkInHistory.map((entry) => (
+                    <div key={entry.date} className={styles.checkinRow}>
+                      <span>{entry.date}</span>
+                      <span className={styles.checkinHash}>
+                        {entry.txHash
+                          ? `${entry.txHash.slice(0, 6)}…${entry.txHash.slice(-4)}`
+                          : "ok"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className={styles.statusRow}>
             <span className={styles.comboBadge}>{comboLabel}</span>
             <span>{taps} taps</span>
