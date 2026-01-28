@@ -447,9 +447,24 @@ export default function Home() {
                   trackEvent("checkin_error", { error: error?.message });
                 }}
                 onStatus={(status) => {
-                  if (status?.statusName === "pending") {
+                  if (
+                    status?.statusName === "transactionPending" ||
+                    status?.statusName === "buildingTransaction"
+                  ) {
                     setCheckInStatus("pending");
                     setCheckInStatusMessage("Transaction pending...");
+                  }
+                  if (status?.statusName === "transactionLegacyExecuted") {
+                    setCheckInStatus("success");
+                    setCheckInStatusMessage("Transaction confirmed.");
+                  }
+                  if (status?.statusName === "error") {
+                    setCheckInStatus("error");
+                    setCheckInStatusMessage("Transaction failed. Try again.");
+                  }
+                  if (status?.statusName === "reset") {
+                    setCheckInStatus("idle");
+                    setCheckInStatusMessage("Ready to check in.");
                   }
                   setCheckInClicks((prev) => prev + 1);
                 }}
